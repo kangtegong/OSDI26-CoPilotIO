@@ -13,6 +13,65 @@
 
 #ifdef _CUDA
 #include <nv-p2p.h>
+#include <linux/module.h>
+#include <linux/mutex.h>
+
+/*
+ * nvidia_p2p_* are resolved at run time with __symbol_get instead of being linked
+ * against the NVIDIA driver's Module.symvers. The module then builds against the
+ * proprietary driver (which ships no Module.symvers), and loads on kernels >= 5.9,
+ * which refuse to link a GPL module against a proprietary module's exports.
+ * (Same approach as Tutti's snvme peer_memory/nvidia.c.)
+ */
+static typeof(&nvidia_p2p_get_pages) p2p_get_pages;
+static typeof(&nvidia_p2p_put_pages) p2p_put_pages;
+static typeof(&nvidia_p2p_free_page_table) p2p_free_page_table;
+static typeof(&nvidia_p2p_dma_map_pages) p2p_dma_map_pages;
+static typeof(&nvidia_p2p_dma_unmap_pages) p2p_dma_unmap_pages;
+static DEFINE_MUTEX(p2p_lock);
+void libnvm_p2p_release(void);
+
+static int libnvm_p2p_resolve(void)
+{
+    int err = 0;
+    mutex_lock(&p2p_lock);
+    if (p2p_get_pages == NULL)
+    {
+        p2p_get_pages = __symbol_get("nvidia_p2p_get_pages");
+        p2p_put_pages = __symbol_get("nvidia_p2p_put_pages");
+        p2p_free_page_table = __symbol_get("nvidia_p2p_free_page_table");
+        p2p_dma_map_pages = __symbol_get("nvidia_p2p_dma_map_pages");
+        p2p_dma_unmap_pages = __symbol_get("nvidia_p2p_dma_unmap_pages");
+        if (!p2p_get_pages || !p2p_put_pages || !p2p_free_page_table || !p2p_dma_map_pages || !p2p_dma_unmap_pages)
+        {
+            printk(KERN_ERR "libnvm: nvidia_p2p_* symbols not found (is the nvidia module loaded?)\n");
+            mutex_unlock(&p2p_lock);
+            libnvm_p2p_release();
+            return -ENOENT;
+        }
+    }
+    mutex_unlock(&p2p_lock);
+    return err;
+}
+
+void libnvm_p2p_release(void)
+{
+    mutex_lock(&p2p_lock);
+    if (p2p_get_pages) __symbol_put("nvidia_p2p_get_pages");
+    if (p2p_put_pages) __symbol_put("nvidia_p2p_put_pages");
+    if (p2p_free_page_table) __symbol_put("nvidia_p2p_free_page_table");
+    if (p2p_dma_map_pages) __symbol_put("nvidia_p2p_dma_map_pages");
+    if (p2p_dma_unmap_pages) __symbol_put("nvidia_p2p_dma_unmap_pages");
+    p2p_get_pages = NULL; p2p_put_pages = NULL; p2p_free_page_table = NULL;
+    p2p_dma_map_pages = NULL; p2p_dma_unmap_pages = NULL;
+    mutex_unlock(&p2p_lock);
+}
+
+#define nvidia_p2p_get_pages(...)       p2p_get_pages(__VA_ARGS__)
+#define nvidia_p2p_put_pages(...)       p2p_put_pages(__VA_ARGS__)
+#define nvidia_p2p_free_page_table(...) p2p_free_page_table(__VA_ARGS__)
+#define nvidia_p2p_dma_map_pages(...)   p2p_dma_map_pages(__VA_ARGS__)
+#define nvidia_p2p_dma_unmap_pages(...) p2p_dma_unmap_pages(__VA_ARGS__)
 
 struct gpu_region
 {
@@ -315,6 +374,12 @@ int map_gpu_memory(struct map* map, struct list* list)
     const struct list_node* element;
     struct ctrl* ctrl;
 
+    err = libnvm_p2p_resolve();
+    if (err != 0)
+    {
+        return err;
+    }
+
     gd = kmalloc(sizeof(struct gpu_region), GFP_KERNEL);
     if (gd == NULL)
     {
@@ -392,6 +457,9 @@ int map_gpu_memory(struct map* map, struct list* list)
                 map->addrs[i] = gd->mappings[0]->dma_addresses[i];
                 //printk("++paddr: %llx\n", (uint64_t) map->addrs[i]);
             }
+            printk(KERN_INFO "libnvm P2P: GPU vaddr=%llx n_pages=%lu dma[0]=%llx dma[last]=%llx\n",
+                   (unsigned long long) map->vaddr, map->n_addrs, (unsigned long long) map->addrs[0],
+                   (unsigned long long) map->addrs[map->n_addrs - 1]);
         }
         element = list_next(element);
     }

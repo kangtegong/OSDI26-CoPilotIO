@@ -62,4 +62,9 @@ struct map* map_device_memory(struct list* list, const struct ctrl* ctrl, u64 va
 struct map* map_find(const struct list* list, u64 vaddr);
 
 
+#ifdef _CUDA
+/* Drop the references taken on the nvidia_p2p_* symbols (module exit). */
+void libnvm_p2p_release(void);
+#endif
+
 #endif /* __LIBNVM_HELPER_MAP_H__ */

@@ -372,6 +372,9 @@ static void __exit libnvm_helper_exit(void)
     {
         printk(KERN_NOTICE "%lu host memory mappings were still in use on unload\n", remaining);
     }
+#ifdef _CUDA
+    libnvm_p2p_release();
+#endif
     printk(KERN_DEBUG DRIVER_NAME " Before pci_unregister_driver\n");
     pci_unregister_driver(&driver);
     printk(KERN_DEBUG DRIVER_NAME " After pci_unregister_driver\n");
