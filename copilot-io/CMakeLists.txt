@@ -89,9 +89,11 @@ install (TARGETS libnvm DESTINATION "lib")
 
 # Kernel module
 if (NOT no_module)
-    if (CUDA_FOUND AND NOT no_cuda AND EXISTS "${driver_dir}/Module.symvers")
+    # nvidia_p2p_* are resolved at run time (module/map.c), so only nv-p2p.h is needed:
+    # works with the proprietary driver, which ships no Module.symvers
+    if (CUDA_FOUND AND NOT no_cuda AND EXISTS "${driver_include}/nv-p2p.h")
         set (module_ccflags "-D_CUDA -I${driver_include} -I${libnvm_root} -I${libnvm_root}/linux")
-        set (module_symbols "${driver_dir}/Module.symvers")
+        set (module_symbols "")
         message(STATUS "Configuring kernel module with CUDA")
     else ()
         set (module_ccflags "-I${libnvm_root} -I${libnvm_root}/linux")
