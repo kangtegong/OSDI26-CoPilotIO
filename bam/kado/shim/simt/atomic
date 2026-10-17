@@ -1,0 +1,24 @@
+// kado shim: BaM's bundled libcu++ ("simt", include/freestanding) does not compile with gcc >= 13
+// (it names a template __is_convertible, a gcc 13 built-in). CUDA's own libcu++ (CCCL) has the
+// same API under cuda:: - this header maps BaM's simt:: names onto it.
+#pragma once
+#include <cuda/atomic>
+#include <cuda/std/atomic>
+#include <cuda/std/cstddef>
+#include <cuda/std/cstdint>
+#include <cuda/std/type_traits>
+namespace simt {
+using cuda::atomic;
+using cuda::thread_scope;
+using cuda::thread_scope_block;
+using cuda::thread_scope_device;
+using cuda::thread_scope_system;
+using cuda::std::memory_order;
+using cuda::std::memory_order_relaxed;
+using cuda::std::memory_order_consume;
+using cuda::std::memory_order_acquire;
+using cuda::std::memory_order_release;
+using cuda::std::memory_order_acq_rel;
+using cuda::std::memory_order_seq_cst;
+namespace std = ::cuda::std;
+}  // namespace simt

@@ -1,0 +1,3 @@
+// kado shim: see simt/atomic
+#pragma once
+#include <simt/atomic>
