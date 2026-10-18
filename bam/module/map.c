@@ -77,6 +77,7 @@ struct gpu_region
 {
     nvidia_p2p_page_table_t* pages;
     nvidia_p2p_dma_mapping_t** mappings;
+    int modref;     /* this mapping holds a reference on the module (see map_gpu_memory) */
 };
 #endif
 
@@ -285,6 +286,7 @@ static void force_release_gpu_memory(struct map* map)
 {
     struct gpu_region* gd = (struct gpu_region*) map->data;
     struct list* list = map->ctrl_list;
+    int modref = gd != NULL && gd->modref;
 
     if (gd != NULL)
     {
@@ -318,6 +320,8 @@ static void force_release_gpu_memory(struct map* map)
     }
 
     unmap_and_release(map);
+    if (modref)
+        module_put(THIS_MODULE);
 }
 #endif
 
@@ -328,6 +332,7 @@ void release_gpu_memory(struct map* map)
 {
     struct gpu_region* gd = (struct gpu_region*) map->data;
     struct list* list = map->ctrl_list;
+    int modref = gd != NULL && gd->modref;
 
     if (gd != NULL)
     {
@@ -358,6 +363,8 @@ void release_gpu_memory(struct map* map)
         map->data = NULL;
 
         //printk(KERN_DEBUG "Released %lu GPU pages\n", map->n_addrs);
+        if (modref)
+            module_put(THIS_MODULE);
     }
 }
 #endif
@@ -400,6 +407,21 @@ int map_gpu_memory(struct map* map, struct list* list)
 
     gd->pages = NULL;
     //gd->mappings = NULL;
+
+    /* Hold a module reference for as long as the NVIDIA driver may call
+     * force_release_gpu_memory() for this mapping, i.e. until the mapping is released by
+     * nvidia_p2p_put_pages() (release_gpu_memory) or by that callback. Without it the module
+     * could be unloaded while a process that owns the GPU memory is still exiting: the
+     * unload freed the mapping, the driver's callback then used it - general protection fault
+     * in list_remove, kernel panic (2026-10-17 and -18). With the reference, rmmod fails
+     * ("in use") until every GPU mapping is gone. */
+    if (!try_module_get(THIS_MODULE))
+    {
+        kfree(gd->mappings);
+        kfree(gd);
+        return -ENODEV;
+    }
+    gd->modref = 1;
 
     map->page_size = GPU_PAGE_SIZE;
     map->data = gd;
